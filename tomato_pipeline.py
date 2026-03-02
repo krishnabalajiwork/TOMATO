@@ -2,7 +2,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -34,10 +34,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_classifier_model(num_classes: int = 2) -> torch.nn.Module:
-    model = models.resnet18(weights=None)
-    model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
-    return model
+def build_classifier_model(num_classes: int = 2, architecture: str = "resnet18") -> torch.nn.Module:
+    if architecture == "resnet18":
+        model = models.resnet18(weights=None)
+        model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+        return model
+
+    if architecture == "efficientnet_b0":
+        model = models.efficientnet_b0(weights=None)
+        model.classifier[1] = torch.nn.Linear(model.classifier[1].in_features, num_classes)
+        return model
+
+    raise ValueError(f"Unsupported classifier architecture: {architecture}")
+
+
+def _normalize_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    normalized = {}
+    for key, value in state_dict.items():
+        if key.startswith("module."):
+            normalized[key[len("module.") :]] = value
+        else:
+            normalized[key] = value
+    return normalized
+
+
+def _infer_classifier_architecture(state_dict: Dict[str, torch.Tensor]) -> str:
+    keys = set(state_dict.keys())
+    if "conv1.weight" in keys or any(k.startswith("layer1.") for k in keys):
+        return "resnet18"
+    if any(k.startswith("features.") for k in keys) and any(k.startswith("classifier.") for k in keys):
+        return "efficientnet_b0"
+    return "resnet18"
 
 
 def load_classifier(classifier_path: Path, device: str) -> torch.nn.Module:
@@ -45,18 +72,31 @@ def load_classifier(classifier_path: Path, device: str) -> torch.nn.Module:
 
     if isinstance(checkpoint, torch.nn.Module):
         model = checkpoint
-    else:
-        model = build_classifier_model(num_classes=2)
-        if isinstance(checkpoint, dict):
-            if "state_dict" in checkpoint:
-                state_dict = checkpoint["state_dict"]
-            elif "model_state_dict" in checkpoint:
-                state_dict = checkpoint["model_state_dict"]
-            else:
-                state_dict = checkpoint
-            model.load_state_dict(state_dict)
+    elif isinstance(checkpoint, dict):
+        if "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        elif "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
         else:
-            raise ValueError("Unsupported .pth format. Provide a full model or a state_dict checkpoint.")
+            state_dict = checkpoint
+
+        if not isinstance(state_dict, dict):
+            raise ValueError("Unsupported .pth format. Checkpoint state_dict is not a dictionary.")
+
+        state_dict = _normalize_state_dict_keys(state_dict)
+        architecture = _infer_classifier_architecture(state_dict)
+        model = build_classifier_model(num_classes=2, architecture=architecture)
+
+        try:
+            model.load_state_dict(state_dict, strict=True)
+        except RuntimeError as exc:
+            raise ValueError(
+                "Could not load classifier weights. "
+                "Detected architecture may not match checkpoint. "
+                "Please export full model (`torch.save(model, ...)`) or adjust build_classifier_model()."
+            ) from exc
+    else:
+        raise ValueError("Unsupported .pth format. Provide a full model or a state_dict checkpoint.")
 
     model.to(device)
     model.eval()
