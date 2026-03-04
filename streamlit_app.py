@@ -9,77 +9,73 @@ import torch
 from ultralytics import YOLO
 from tomato_pipeline import load_classifier, make_transform, classify_crop
 
+
 # -------------------------------------------------
 # PAGE CONFIG
 # -------------------------------------------------
 st.set_page_config(
-    page_title="AI Tomato Sorting System",
+    page_title="Tomato AI Inspector",
     page_icon="🍅",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+
 # -------------------------------------------------
-# CUSTOM CSS (LEVEL-10 UI)
+# MODERN CSS
 # -------------------------------------------------
 st.markdown("""
 <style>
 
-.main {
-background: linear-gradient(135deg,#0f172a,#1e293b);
+#MainMenu {visibility:hidden;}
+footer {visibility:hidden;}
+
+.block-container{
+padding-top:2rem;
 }
 
-h1 {
-text-align:center;
-color:#ff4b4b;
+.big-title{
+font-size:48px;
+font-weight:700;
 }
 
-.card {
-background-color:#1e293b;
-padding:25px;
-border-radius:15px;
-box-shadow:0px 6px 20px rgba(0,0,0,0.4);
+.subtitle{
+font-size:20px;
+color:#6b7280;
+margin-bottom:30px;
 }
 
-.metric-card{
+.card{
 background:#111827;
 padding:20px;
 border-radius:12px;
-text-align:center;
-font-size:20px;
+box-shadow:0 10px 25px rgba(0,0,0,0.3);
 }
 
-.stButton>button {
-background: linear-gradient(90deg,#ff4b4b,#ff7b7b);
-color:white;
+.metric-card{
+background:#1f2937;
+padding:20px;
 border-radius:10px;
-height:55px;
+text-align:center;
+}
+
+button[kind="primary"]{
+height:50px;
 font-size:18px;
-border:none;
 }
-
-.stButton>button:hover {
-background: linear-gradient(90deg,#ff7b7b,#ff4b4b);
-}
-
-footer {visibility:hidden;}
 
 </style>
 """, unsafe_allow_html=True)
 
+
 # -------------------------------------------------
 # HEADER
 # -------------------------------------------------
-st.markdown(
-"""
-<h1>🍅 AI Tomato Sorting System</h1>
-<p style='text-align:center;font-size:18px;color:lightgray'>
-Real-time Tomato Detection and Quality Classification using YOLO + EfficientNet
-</p>
-""",
-unsafe_allow_html=True
-)
+st.markdown('<div class="big-title">🍅 Tomato AI Quality Inspector</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">YOLO Detection + EfficientNet Classification</div>', unsafe_allow_html=True)
 
 st.divider()
+
 
 # -------------------------------------------------
 # MODEL PATHS
@@ -87,44 +83,48 @@ st.divider()
 DETECTOR_PATH = Path("best.pt")
 CLASSIFIER_PATH = Path("efficientnet_b0_best.pth")
 
+
 # -------------------------------------------------
 # SIDEBAR
 # -------------------------------------------------
 with st.sidebar:
 
-    st.header("⚙️ Settings")
+    st.title("⚙ Settings")
 
-    device = st.selectbox("Device", ["cpu", "cuda"], index=0)
+    device = st.selectbox(
+        "Compute Device",
+        ["cpu", "cuda"]
+    )
 
-    img_size = st.number_input(
-        "Classifier Image Size",
-        64,
-        1024,
-        224,
-        32
+    img_size = st.slider(
+        "Classifier Resolution",
+        128,
+        512,
+        224
     )
 
     det_conf = st.slider(
-        "Detection Threshold",
-        0.0,
+        "Detection Confidence",
+        0.1,
         1.0,
-        0.25,
-        0.01
+        0.25
     )
 
     labels_csv = st.text_input(
-        "Labels",
+        "Class Labels",
         "bad,good"
     )
 
     st.divider()
 
-    st.markdown("### System Info")
-    st.write("Model: YOLO + EfficientNet")
-    st.write("Interface: Streamlit")
+    st.caption("Model Stack")
+    st.write("YOLO Detector")
+    st.write("EfficientNet Classifier")
+
 
 if device == "cuda" and not torch.cuda.is_available():
     device = "cpu"
+
 
 # -------------------------------------------------
 # LOAD MODELS
@@ -140,34 +140,58 @@ def load_models(device):
 
 detector, classifier = load_models(device)
 
+
 # -------------------------------------------------
-# INPUT SECTION
+# INPUT PANEL
 # -------------------------------------------------
-st.subheader("📥 Input Image")
+left, right = st.columns([1,1])
 
-mode = st.radio(
-    "Select Input Source",
-    ["Upload Image", "Camera"],
-    horizontal=True
-)
 
-uploaded_image = None
-camera_image = None
+with left:
 
-if mode == "Upload Image":
+    st.subheader("📥 Input")
 
-    uploaded_image = st.file_uploader(
-        "Upload tomato image",
-        type=["jpg","jpeg","png"]
+    mode = st.radio(
+        "Image Source",
+        ["Upload Image","Camera"],
+        horizontal=True
     )
 
-else:
+    uploaded_image=None
+    camera_image=None
 
-    camera_image = st.camera_input(
-        "Take a photo"
+    if mode=="Upload Image":
+
+        uploaded_image=st.file_uploader(
+            "Upload Tomato Image",
+            type=["jpg","jpeg","png"]
+        )
+
+    else:
+
+        camera_image=st.camera_input("Capture Image")
+
+
+    run = st.button(
+        "Run AI Detection",
+        type="primary",
+        use_container_width=True
     )
 
-run = st.button("🚀 Run AI Detection", use_container_width=True)
+
+with right:
+
+    st.subheader("📊 Detection Stats")
+
+    stat1,stat2,stat3=st.columns(3)
+
+    stat1.metric("Total","-")
+    stat2.metric("Good","-")
+    stat3.metric("Bad","-")
+
+
+st.divider()
+
 
 # -------------------------------------------------
 # INFERENCE
@@ -175,46 +199,47 @@ run = st.button("🚀 Run AI Detection", use_container_width=True)
 if run:
 
     if uploaded_image is None and camera_image is None:
-        st.error("Please upload or capture an image")
+        st.error("Provide an image first.")
         st.stop()
 
-    labels = [l.strip() for l in labels_csv.split(",")]
+    labels=[l.strip() for l in labels_csv.split(",")]
 
     if uploaded_image:
-        image_bytes = uploaded_image.getvalue()
-        input_display = uploaded_image
+        image_bytes=uploaded_image.getvalue()
+        input_display=uploaded_image
     else:
-        image_bytes = camera_image.getvalue()
-        input_display = camera_image
+        image_bytes=camera_image.getvalue()
+        input_display=camera_image
 
-    image_np = cv2.imdecode(
+
+    image_np=cv2.imdecode(
         np.frombuffer(image_bytes,np.uint8),
         cv2.IMREAD_COLOR
     )
 
-    h,w = image_np.shape[:2]
+    h,w=image_np.shape[:2]
 
-    output = image_np.copy()
+    output=image_np.copy()
 
-    transform = make_transform(int(img_size))
+    transform=make_transform(img_size)
 
-    detections = detector.predict(
+    detections=detector.predict(
         source=image_np,
         conf=float(det_conf),
         device=device,
         verbose=False
     )
 
-    results = []
+    results=[]
+    good_count=0
+    bad_count=0
 
-    good_count = 0
-    bad_count = 0
 
     if detections and detections[0].boxes is not None:
 
         for box in detections[0].boxes:
 
-            x1,y1,x2,y2 = box.xyxy[0].tolist()
+            x1,y1,x2,y2=box.xyxy[0].tolist()
 
             x1=max(0,min(int(x1),w-1))
             y1=max(0,min(int(y1),h-1))
@@ -241,6 +266,7 @@ if run:
                 bad_count+=1
                 color=(0,0,255)
 
+
             text=f"{quality_label} {quality_conf:.2f}"
 
             cv2.rectangle(output,(x1,y1),(x2,y2),color,2)
@@ -248,48 +274,48 @@ if run:
             cv2.putText(
                 output,
                 text,
-                (x1,y1-5),
+                (x1,y1-6),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 color,
                 2
             )
 
+
             results.append({
-                "bbox":(x1,y1,x2,y2),
+                "bbox":[x1,y1,x2,y2],
                 "label":quality_label,
                 "confidence":float(quality_conf)
             })
 
+
     output_rgb=cv2.cvtColor(output,cv2.COLOR_BGR2RGB)
 
-    st.divider()
 
     # -------------------------------------------------
-    # METRICS
+    # METRICS UPDATE
     # -------------------------------------------------
-    col1,col2,col3=st.columns(3)
+    stat1.metric("Total",len(results))
+    stat2.metric("Good",good_count)
+    stat3.metric("Bad",bad_count)
 
-    col1.metric("Total Tomatoes",len(results))
-    col2.metric("Good Tomatoes",good_count)
-    col3.metric("Bad Tomatoes",bad_count)
-
-    st.divider()
 
     # -------------------------------------------------
-    # IMAGE DISPLAY
+    # RESULT PANEL
     # -------------------------------------------------
-    col1,col2=st.columns(2)
+    img1,img2=st.columns(2)
 
-    with col1:
+    with img1:
         st.subheader("Input Image")
         st.image(input_display,use_container_width=True)
 
-    with col2:
+    with img2:
         st.subheader("Detection Result")
         st.image(output_rgb,use_container_width=True)
 
+
     st.divider()
+
 
     st.subheader("Detection JSON")
 
@@ -305,16 +331,3 @@ if run:
         ),
         language="json"
     )
-
-# -------------------------------------------------
-# FOOTER
-# -------------------------------------------------
-st.markdown(
-"""
-<hr>
-<center style='color:gray'>
-AI Tomato Sorting System | YOLO Detection + EfficientNet Classification
-</center>
-""",
-unsafe_allow_html=True
-)
