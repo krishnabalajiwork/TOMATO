@@ -13,92 +13,162 @@ from tomato_pipeline import (
     classify_crop,
 )
 
+# -------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------
+st.set_page_config(
+    page_title="Tomato Quality Detection",
+    page_icon="🍅",
+    layout="wide"
+)
 
 # -------------------------------------------------
-# CONFIG
+# HEADER
 # -------------------------------------------------
-st.set_page_config(page_title="Tomato Quality Checker", layout="wide")
-st.title("🍅 Tomato Detection + Good/Bad Classification")
+st.markdown(
+    """
+    <h1 style='text-align:center;color:#ff4b4b;'>
+    🍅 Tomato Quality Detection System
+    </h1>
+    <p style='text-align:center;font-size:18px;'>
+    Detect tomatoes and classify them as <b>Good</b> or <b>Bad</b> using AI
+    </p>
+    """,
+    unsafe_allow_html=True
+)
 
-# 🔥 MODELS ALREADY IN REPO
+st.divider()
+
+# -------------------------------------------------
+# MODEL PATHS
+# -------------------------------------------------
 DETECTOR_PATH = Path("best.pt")
 CLASSIFIER_PATH = Path("efficientnet_b0_best.pth")
-
 
 # -------------------------------------------------
 # SIDEBAR SETTINGS
 # -------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
 
-    device = st.selectbox("Device", ["cpu", "cuda"], index=0)
-    img_size = st.number_input("Classifier image size", 64, 1024, 224, 32)
-    det_conf = st.slider("Detection threshold", 0.0, 1.0, 0.25, 0.01)
-    labels_csv = st.text_input("Labels (index order)", "bad,good")
+    st.header("⚙️ Settings")
+
+    device = st.selectbox(
+        "Device",
+        ["cpu", "cuda"],
+        index=0
+    )
+
+    img_size = st.number_input(
+        "Classifier Image Size",
+        64,
+        1024,
+        224,
+        32
+    )
+
+    det_conf = st.slider(
+        "Detection Threshold",
+        0.0,
+        1.0,
+        0.25,
+        0.01
+    )
+
+    labels_csv = st.text_input(
+        "Labels (index order)",
+        "bad,good"
+    )
+
+    st.markdown("---")
+    st.markdown("AI Tomato Sorting System")
 
 if device == "cuda" and not torch.cuda.is_available():
     st.warning("CUDA not available, switching to CPU")
     device = "cpu"
 
-
 # -------------------------------------------------
-# LOAD MODELS (CACHED)
+# LOAD MODELS
 # -------------------------------------------------
 @st.cache_resource
 def load_models(device):
+
     detector = YOLO(str(DETECTOR_PATH))
     classifier = load_classifier(CLASSIFIER_PATH, device)
+
     return detector, classifier
 
 
 detector, classifier = load_models(device)
 
-
 # -------------------------------------------------
 # INPUT MODE
 # -------------------------------------------------
-mode = st.radio("Choose Input Mode", ["Upload Image", "Live Camera"])
+st.subheader("Input")
+
+mode = st.radio(
+    "Select Input Method",
+    ["📁 Upload Image", "📷 Use Camera"],
+    horizontal=True
+)
 
 uploaded_image = None
 camera_image = None
 
-if mode == "Upload Image":
-    uploaded_image = st.file_uploader(
-        "Upload tomato image",
-        type=["jpg", "jpeg", "png"],
-    )
-else:
-    camera_image = st.camera_input("Take a photo")
+if mode == "📁 Upload Image":
 
+    uploaded_image = st.file_uploader(
+        "Upload a tomato image",
+        type=["jpg", "jpeg", "png"]
+    )
+
+else:
+
+    camera_image = st.camera_input(
+        "Take a photo"
+    )
+
+# -------------------------------------------------
+# RUN BUTTON
+# -------------------------------------------------
+run = st.button(
+    "🚀 Run Detection",
+    use_container_width=True
+)
 
 # -------------------------------------------------
 # RUN INFERENCE
 # -------------------------------------------------
-if st.button("Run Inference"):
+if run:
 
     if uploaded_image is None and camera_image is None:
+
         st.error("Please provide an image.")
         st.stop()
 
     labels = [l.strip() for l in labels_csv.split(",")]
+
     if len(labels) != 2:
-        st.error("Provide exactly 2 labels like: good,bad")
+
+        st.error("Provide exactly 2 labels like: bad,good")
         st.stop()
 
-    # Get image bytes
     if uploaded_image:
+
         image_bytes = uploaded_image.getvalue()
         input_display = uploaded_image
+
     else:
+
         image_bytes = camera_image.getvalue()
         input_display = camera_image
 
     image_np = cv2.imdecode(
         np.frombuffer(image_bytes, np.uint8),
-        cv2.IMREAD_COLOR,
+        cv2.IMREAD_COLOR
     )
 
     h, w = image_np.shape[:2]
+
     output = image_np.copy()
 
     transform = make_transform(int(img_size))
@@ -107,21 +177,24 @@ if st.button("Run Inference"):
         source=image_np,
         conf=float(det_conf),
         device=device,
-        verbose=False,
+        verbose=False
     )
 
     results = []
 
     if detections and detections[0].boxes is not None:
+
         for box in detections[0].boxes:
 
             x1, y1, x2, y2 = box.xyxy[0].tolist()
+
             x1 = max(0, min(int(x1), w - 1))
             y1 = max(0, min(int(y1), h - 1))
             x2 = max(0, min(int(x2), w - 1))
             y2 = max(0, min(int(y2), h - 1))
 
             crop = image_np[y1:y2, x1:x2]
+
             if crop.size == 0:
                 continue
 
@@ -145,9 +218,17 @@ if st.button("Run Inference"):
             )
 
             color = (0, 200, 0) if quality_label == "good" else (0, 0, 255)
+
             text = f"{quality_label} ({quality_conf:.2f})"
 
-            cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(
+                output,
+                (x1, y1),
+                (x2, y2),
+                color,
+                2
+            )
+
             cv2.putText(
                 output,
                 text,
@@ -160,17 +241,41 @@ if st.button("Run Inference"):
 
     output_rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
 
-    col1, col2 = st.columns(2)
+    # -------------------------------------------------
+    # DISPLAY IMAGES
+    # -------------------------------------------------
+    st.divider()
+
+    col1, col2 = st.columns([1, 1], gap="large")
 
     with col1:
-        st.subheader("Input")
-        st.image(input_display, width="stretch")
+
+        st.subheader("Input Image")
+
+        st.image(
+            input_display,
+            use_container_width=True
+        )
 
     with col2:
-        st.subheader("Output")
-        st.image(output_rgb, width="stretch")
 
+        st.subheader("Detection Result")
+
+        st.image(
+            output_rgb,
+            use_container_width=True
+        )
+
+    # -------------------------------------------------
+    # SUMMARY
+    # -------------------------------------------------
+    st.success(f"Detected {len(results)} tomatoes")
+
+    # -------------------------------------------------
+    # JSON OUTPUT
+    # -------------------------------------------------
     st.subheader("Results JSON")
+
     st.code(
         json.dumps(
             {
@@ -181,3 +286,13 @@ if st.button("Run Inference"):
         ),
         language="json",
     )
+
+# -------------------------------------------------
+# FOOTER
+# -------------------------------------------------
+st.divider()
+
+st.markdown(
+    "<center>AI-Based Tomato Quality Inspection System</center>",
+    unsafe_allow_html=True
+)
