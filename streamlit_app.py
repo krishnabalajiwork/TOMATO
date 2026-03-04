@@ -34,7 +34,7 @@ with st.sidebar:
     device = st.selectbox("Device", ["cpu", "cuda"], index=0)
     img_size = st.number_input("Classifier image size", 64, 1024, 224, 32)
     det_conf = st.slider("Detection threshold", 0.0, 1.0, 0.25, 0.01)
-    labels_csv = st.text_input("Labels (index order)", "good,bad")
+    labels_csv = st.text_input("Labels (index order)", "bad,good")
 
 if device == "cuda" and not torch.cuda.is_available():
     st.warning("CUDA not available, switching to CPU")
